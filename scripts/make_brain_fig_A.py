@@ -161,9 +161,10 @@ def netplot_connectome(fig, spec, coef, top, coords, c2d, edge_color, n_top=70, 
             ax = fig.add_subplot(sub[0, k], projection="3d")
             netplotbrain.plot(nodes=nodes, edges=A, fig=fig, ax=ax, view=v,
                               template="MNI152NLin2009cAsym", templatestyle="glass",
+                              template_glass_maxalpha=0.03, template_glass_pointsize=1.6,  # visible brain shell
                               node_color=ncol, node_size=nsz, node_alpha=1.0,
                               edge_color=edge_color, edge_alpha=0.55, edge_widthscale=0.55,
-                              arrowaxis=None, subtitles=None)
+                              arrowaxis=None, subtitles=None, title=None)
             axes.append(ax)
     finally:
         fig.tight_layout = _tl

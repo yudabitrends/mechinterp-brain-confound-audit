@@ -88,7 +88,7 @@ def main():
             sax = fig.add_subplot(sub[0, i], projection="3d")
             plotting.plot_surf_stat_map(FS["infl_" + h], tex[h], hemi=h, view=v, colorbar=False,
                 threshold=thr, vmax=vmax, cmap=cmap, bg_map=FS["sulc_" + h], axes=sax)
-            try: sax.set_box_aspect(None, zoom=1.3)   # fill the cell, trim the 3D-axes whitespace
+            try: sax.set_box_aspect(None, zoom=1.85)   # zoom in so each brain fills its cell (no figure growth)
             except Exception: pass
         cax = fig.add_subplot(sub[0, 4]); sm = ScalarMappable(Normalize(thr, vmax), cmap); sm.set_array([])
         cb = fig.colorbar(sm, cax=cax); cb.set_ticks([thr, vmax]); cb.ax.tick_params(labelsize=5, length=2)
