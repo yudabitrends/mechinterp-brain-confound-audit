@@ -79,9 +79,9 @@ def main():
         projected with vol_to_surf, which captures only cortical signal -- deep/subcortical signal is shown by
         the montages (c, d) below."""
         tex = {h: surface.vol_to_surf(img, FS["pial_" + h]) for h in ("left", "right")}
-        pos = row_spec.get_position(fig)                       # label via fig.text (3D-axes titles are unreliable)
-        fig.text(pos.x0 + 0.004, pos.y1 - 0.004, label, fontsize=8.0, fontweight="bold", color=color,
-                 ha="left", va="top")
+        pos = row_spec.get_position(fig)                       # label ABOVE the cell (in the gap) so the zoomed
+        fig.text(pos.x0 + 0.004, pos.y1 + 0.004, label, fontsize=8.0, fontweight="bold", color=color,
+                 ha="left", va="bottom")                       # brain cannot overlap it
         sub = row_spec.subgridspec(1, 5, width_ratios=[1, 1, 1, 1, 0.05], wspace=0.0)
         for i, (h, v) in enumerate([("left", "lateral"), ("left", "medial"),
                                     ("right", "medial"), ("right", "lateral")]):
@@ -96,9 +96,9 @@ def main():
     fig = plt.figure(figsize=(183 * MM, 192 * MM))
     # a,b are now inflated cortical-SURFACE renders (publication-grade, headless via matplotlib); the voxel
     # montages c,d are retained because the surface projection drops deep/subcortical signal, which they show.
-    gs = fig.add_gridspec(6, 2, height_ratios=[0.74, 0.74, 0.48, 0.48, 0.95, 0.95], hspace=0.26, wspace=0.04,
-                          left=0.025, right=0.99, top=0.935, bottom=0.04)
-    fig.text(0.025, 0.968, "Structural anatomy of the confound and the functional-network atlas",
+    gs = fig.add_gridspec(6, 2, height_ratios=[0.74, 0.74, 0.48, 0.48, 0.95, 0.95], hspace=0.30, wspace=0.04,
+                          left=0.025, right=0.99, top=0.922, bottom=0.04)
+    fig.text(0.025, 0.965, "Structural anatomy of the confound and the functional-network atlas",
              fontsize=10.5, fontweight="bold")
 
     surf_row(gs[0, :], scan, "autumn_r", 0.45, "a   VBM scanner (US vs.\\ China, |AUC$-$0.5|), cortical surface", C_SCAN)
@@ -121,15 +121,17 @@ def main():
         node_vmax=vmx, display_mode="lzr", axes=ax, colorbar=True, node_size=40 + 420 * di_v / vmx)
     ax.set_title("f   FreeSurfer subcortical disease |AUC$-$0.5|", loc="left", fontweight="bold", fontsize=8.0, color=C_DIS, y=0.97)
 
-    ax = fig.add_subplot(gs[5, 0])
+    # g (atlas montage) and h (statistics) need real horizontal separation, so give row 5 its own wider wspace
+    row5 = gs[5, :].subgridspec(1, 2, wspace=0.42)
+    ax = fig.add_subplot(row5[0, 0])
     try:
-        plotting.plot_prob_atlas(NMARK, display_mode="z", cut_coords=5, axes=ax, colorbar=False,
+        plotting.plot_prob_atlas(NMARK, display_mode="z", cut_coords=4, axes=ax, colorbar=False,
                                  view_type="filled_contours", linewidths=0.4)
     except Exception as e:
         ax.text(0.5, 0.5, f"atlas render skipped", ha="center", fontsize=6); print("atlas:", e)
     ax.set_title("g   Neuromark 53-ICN atlas", loc="left", fontweight="bold", fontsize=8.0, y=1.0)
 
-    ax = fig.add_subplot(gs[5, 1])
+    ax = fig.add_subplot(row5[0, 1])
     mx = max(np.abs(a_s - 0.5).max(), np.abs(a_d - 0.5).max())
     ax.hist2d(np.abs(a_s - 0.5), np.abs(a_d - 0.5), bins=70, cmin=1, cmap="magma_r")
     ax.plot([0, mx], [0, mx], ls=":", lw=0.8, color="#777")
