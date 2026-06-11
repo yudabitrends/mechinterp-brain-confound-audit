@@ -1,0 +1,22 @@
+# caches / compiled
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ipynb_checkpoints/
+
+# data and model artifacts are NOT redistributed (see README "Data availability")
+outputs/
+*.pt
+*.npy
+*.npz
+*.mat
+*.nii
+*.nii.gz
+*.pkl
+*.h5
+
+# local env
+.venv/
+venv/
+.env
