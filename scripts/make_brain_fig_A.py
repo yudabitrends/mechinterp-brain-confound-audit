@@ -14,6 +14,7 @@ Data: outputs/p_fnc_edge_importance/ (+ NeuroMark1 domain template). 53-ICN atla
 N=1,246 SZ subjects / 16 sites / 1,378 FNC edges. Run: python scripts/make_fig_brain_atlas.py
 """
 from __future__ import annotations
+import os
 import json
 from pathlib import Path
 import numpy as np
@@ -141,6 +142,34 @@ def matrix_panel(ax, M, order, bnds, cmap, title, lab):
     ax.set_title(f"{lab}   {title}", loc="left", fontweight="bold", fontsize=8.5, pad=4)
 
 
+def netplot_connectome(fig, spec, coef, top, coords, c2d, edge_color, n_top=70, views=("L", "S", "R")):
+    """Embed a modern 3D node-edge connectome (netplotbrain, matplotlib Axes3D -> headless-safe, no VTK) into the
+    gridspec region `spec`, split into len(views) sub-axes on a translucent MNI template. Nodes are coloured by
+    functional domain and sized by incident importance. We neutralise netplotbrain's internal fig.tight_layout()
+    so it cannot disturb the surrounding multi-panel gridspec."""
+    os.environ.setdefault("TEMPLATEFLOW_HOME", "/data/users1/ybi/mechinterp_brain/templateflow")
+    import netplotbrain, pandas as pd
+    A = adjacency(coef, top, n_top)
+    nodes = pd.DataFrame({"x": coords[:, 0], "y": coords[:, 1], "z": coords[:, 2]})
+    ncol = [DOM_COL[c2d[i]] for i in range(N_ICN)]
+    nsz = 5 + 16 * (A.sum(0) / (A.sum(0).max() + 1e-9))
+    sub = spec.subgridspec(1, len(views), wspace=0.0)
+    axes = []
+    _tl = fig.tight_layout; fig.tight_layout = lambda *a, **k: None     # guard the shared gridspec
+    try:
+        for k, v in enumerate(views):                                  # one netplotbrain call per view/axes
+            ax = fig.add_subplot(sub[0, k], projection="3d")
+            netplotbrain.plot(nodes=nodes, edges=A, fig=fig, ax=ax, view=v,
+                              template="MNI152NLin2009cAsym", templatestyle="glass",
+                              node_color=ncol, node_size=nsz, node_alpha=1.0,
+                              edge_color=edge_color, edge_alpha=0.55, edge_widthscale=0.55,
+                              arrowaxis=None, subtitles=None)
+            axes.append(ax)
+    finally:
+        fig.tight_layout = _tl
+    return axes
+
+
 def main():
     from nilearn import plotting
 
@@ -161,21 +190,14 @@ def main():
     fig.text(0.045, 0.975, "Functional connectome: where the scanner confound and disease live",
              fontsize=10.5, fontweight="bold")
 
-    # a, b: glass-brain connectomes ---------------------------------------
-    for row, (coef, top, cmap, col, lab, name) in enumerate([
-            (disease, d_top, "Blues", C_DIS, "a", "Disease-predictive connectome"),
-            (scanner, s_top, "Reds", C_SCAN, "b", "Scanner-predictive connectome")]):
-        ax = fig.add_subplot(gs[row, :])
-        A = adjacency(coef, top, 70)
-        nd = 6 + 34 * (A.sum(0) / (A.sum(0).max() + 1e-9))
-        plotting.plot_connectome(
-            A, coords, node_color=node_colors, node_size=nd,
-            edge_cmap=trunc(cmap), edge_vmin=0.0, edge_vmax=1.0, edge_threshold="0.1%",
-            display_mode="lzry", axes=ax, colorbar=False,
-            node_kwargs={"edgecolors": "white", "linewidths": 0.3},
-            edge_kwargs={"linewidth": 1.3, "alpha": 0.85})
-        ax.set_title(f"{lab}   {name}", loc="left", fontweight="bold", fontsize=9.5,
-                     color=col, y=0.98)
+    # a, b: modern 3D node-edge connectomes on a translucent MNI template (netplotbrain) -------------------
+    for row, (coef, top, col, lab, name) in enumerate([
+            (disease, d_top, C_DIS, "a", "Disease-predictive connectome"),
+            (scanner, s_top, C_SCAN, "b", "Scanner-predictive connectome")]):
+        netplot_connectome(fig, gs[row, :], coef, top, coords, c2d, edge_color=col)
+        pos = gs[row, :].get_position(fig)
+        fig.text(pos.x0 + 0.004, pos.y1 - 0.004, f"{lab}   {name}", fontsize=9.5, fontweight="bold",
+                 color=col, ha="left", va="top")
 
     # c, d: network-block importance matrices (7x7; the level where structure
     #       is interpretable — edge-level 53x53 is too diffuse to read) -------

@@ -24,16 +24,12 @@ OUT = REPO / "manuscript" / "figures"
 C_SCAN, C_DIS = A.C_SCAN, A.C_DIS
 
 
-def connectome(ax, coef, top, cmap, col, lab, name, c2d, coords):
-    from nilearn import plotting
-    Adj = A.adjacency(coef, top, 60)
-    nd = 9 + 42 * (Adj.sum(0) / (Adj.sum(0).max() + 1e-9))
-    plotting.plot_connectome(Adj, coords, node_color=[A.DOM_COL[c2d[i]] for i in range(A.N_ICN)],
-                             node_size=nd, edge_cmap=A.trunc(cmap), edge_vmin=0, edge_vmax=1,
-                             edge_threshold="0.1%", display_mode="lzr", axes=ax, colorbar=False,
-                             node_kwargs={"edgecolors": "white", "linewidths": 0.3},
-                             edge_kwargs={"linewidth": 1.4, "alpha": 0.85})
-    ax.set_title(f"{lab}   {name}", loc="left", fontweight="bold", fontsize=8.0, color=col, y=0.96)
+def connectome(fig, spec, coef, top, col, lab, name, c2d, coords):
+    """Half-width 3D node-edge connectome (netplotbrain, 2 views) embedded into gridspec region `spec`."""
+    A.netplot_connectome(fig, spec, coef, top, coords, c2d, edge_color=col, n_top=60, views=("S", "L"))
+    pos = spec.get_position(fig)
+    fig.text(pos.x0 + 0.006, pos.y1 - 0.004, f"{lab}   {name}", fontsize=8.0, fontweight="bold",
+             color=col, ha="left", va="top")
 
 
 def main():
@@ -55,10 +51,10 @@ def main():
     fig.text(0.035, 0.965, "Scanner edges are distributed and cohort-idiosyncratic: the spatial face of redundancy",
              fontsize=10.5, fontweight="bold")
 
-    connectome(fig.add_subplot(gs[0, 0]), us, us_t, "Reds", C_SCAN, "a", "US within-country site axis", c2d, coords)
-    connectome(fig.add_subplot(gs[0, 1]), cn, cn_t, "Reds", C_SCAN, "b", "China within-country site axis", c2d, coords)
-    connectome(fig.add_subplot(gs[1, 0]), ab_s, ab_st, "Reds", C_SCAN, "c", "Autism (ABIDE) scanner axis", c2d, coords)
-    connectome(fig.add_subplot(gs[1, 1]), ab_d, ab_dt, "Blues", C_DIS, "d", "Autism (ABIDE) disease edges", c2d, coords)
+    connectome(fig, gs[0, 0], us, us_t, C_SCAN, "a", "US within-country site axis", c2d, coords)
+    connectome(fig, gs[0, 1], cn, cn_t, C_SCAN, "b", "China within-country site axis", c2d, coords)
+    connectome(fig, gs[1, 0], ab_s, ab_st, C_SCAN, "c", "Autism (ABIDE) scanner axis", c2d, coords)
+    connectome(fig, gs[1, 1], ab_d, ab_dt, C_DIS, "d", "Autism (ABIDE) disease edges", c2d, coords)
 
     A.block_panel(fig.add_subplot(gs[2, 0]), A.block_matrix(us, c2d), "Reds", "US site network-blocks", "e")
     A.block_panel(fig.add_subplot(gs[2, 1]), A.block_matrix(cn, c2d), "Reds", "China site network-blocks", "f")

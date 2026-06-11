@@ -68,41 +68,60 @@ def main():
     vals = np.load(f"{MAPS}/struct_auc_vals.npz"); a_s, a_d = vals["scanner"], vals["disease"]
     fsa = fs_subcortical_auc()
 
-    fig = plt.figure(figsize=(183 * MM, 205 * MM))
-    # Layout prioritises brain area: the two voxel montages (c, d) are promoted to FULL-WIDTH rows so each
-    # slice renders ~2x larger than in the former half-width cells; glass brains, markers and atlas keep the
-    # two-up arrangement but with near-zero wspace and tight margins so each brain claims maximum width.
-    # Montage rows are kept short (they are width-limited, so extra row height would only add whitespace).
-    gs = fig.add_gridspec(5, 2, height_ratios=[1.12, 0.56, 0.56, 0.98, 0.98], hspace=0.38, wspace=0.04,
-                          left=0.03, right=0.985, top=0.95, bottom=0.042)
-    fig.text(0.03, 0.967, "Structural anatomy of the confound and the functional-network atlas",
+    from nilearn import datasets, surface
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.colors import Normalize
+    FS = datasets.fetch_surf_fsaverage("fsaverage5")
+
+    def surf_row(row_spec, img, cmap, vmax, label, color, thr=0.10):
+        """Render a volumetric map on the inflated cortical surface (lateral+medial, both hemispheres) as four
+        embedded 3D axes plus a slim colorbar. Pure matplotlib (no VTK), so it is headless-safe. The volume is
+        projected with vol_to_surf, which captures only cortical signal -- deep/subcortical signal is shown by
+        the montages (c, d) below."""
+        tex = {h: surface.vol_to_surf(img, FS["pial_" + h]) for h in ("left", "right")}
+        pos = row_spec.get_position(fig)                       # label via fig.text (3D-axes titles are unreliable)
+        fig.text(pos.x0 + 0.004, pos.y1 - 0.004, label, fontsize=8.0, fontweight="bold", color=color,
+                 ha="left", va="top")
+        sub = row_spec.subgridspec(1, 5, width_ratios=[1, 1, 1, 1, 0.05], wspace=0.0)
+        for i, (h, v) in enumerate([("left", "lateral"), ("left", "medial"),
+                                    ("right", "medial"), ("right", "lateral")]):
+            sax = fig.add_subplot(sub[0, i], projection="3d")
+            plotting.plot_surf_stat_map(FS["infl_" + h], tex[h], hemi=h, view=v, colorbar=False,
+                threshold=thr, vmax=vmax, cmap=cmap, bg_map=FS["sulc_" + h], axes=sax)
+            try: sax.set_box_aspect(None, zoom=1.3)   # fill the cell, trim the 3D-axes whitespace
+            except Exception: pass
+        cax = fig.add_subplot(sub[0, 4]); sm = ScalarMappable(Normalize(thr, vmax), cmap); sm.set_array([])
+        cb = fig.colorbar(sm, cax=cax); cb.set_ticks([thr, vmax]); cb.ax.tick_params(labelsize=5, length=2)
+
+    fig = plt.figure(figsize=(183 * MM, 192 * MM))
+    # a,b are now inflated cortical-SURFACE renders (publication-grade, headless via matplotlib); the voxel
+    # montages c,d are retained because the surface projection drops deep/subcortical signal, which they show.
+    gs = fig.add_gridspec(6, 2, height_ratios=[0.74, 0.74, 0.48, 0.48, 0.95, 0.95], hspace=0.26, wspace=0.04,
+                          left=0.025, right=0.99, top=0.935, bottom=0.04)
+    fig.text(0.025, 0.968, "Structural anatomy of the confound and the functional-network atlas",
              fontsize=10.5, fontweight="bold")
 
-    ax = fig.add_subplot(gs[0, 0]); plotting.plot_glass_brain(scan, display_mode="lzr", axes=ax, colorbar=True,
-        threshold=0.10, cmap="autumn_r", vmax=0.45, plot_abs=False)
-    ax.set_title("a   VBM scanner (US vs.\\ China, |AUC$-$0.5|)", loc="left", fontweight="bold", fontsize=8.0, color=C_SCAN, y=0.97)
-    ax = fig.add_subplot(gs[0, 1]); plotting.plot_glass_brain(dis, display_mode="lzr", axes=ax, colorbar=True,
-        threshold=0.10, cmap="winter_r", vmax=0.45, plot_abs=False)
-    ax.set_title("b   VBM disease (SZ vs.\\ HC)", loc="left", fontweight="bold", fontsize=8.0, color=C_DIS, y=0.97)
+    surf_row(gs[0, :], scan, "autumn_r", 0.45, "a   VBM scanner (US vs.\\ China, |AUC$-$0.5|), cortical surface", C_SCAN)
+    surf_row(gs[1, :], dis, "winter_r", 0.45, "b   VBM disease (SZ vs.\\ HC), cortical surface", C_DIS)
 
-    ax = fig.add_subplot(gs[1, :]); plotting.plot_stat_map(scan, display_mode="z", cut_coords=7, axes=ax,
+    ax = fig.add_subplot(gs[2, :]); plotting.plot_stat_map(scan, display_mode="z", cut_coords=7, axes=ax,
         colorbar=False, threshold=0.10, cmap="autumn_r", vmax=0.45, annotate=False, black_bg=False)
-    ax.set_title("c   VBM scanner (axial montage)", loc="left", fontweight="bold", fontsize=8.0, color=C_SCAN, y=1.0)
-    ax = fig.add_subplot(gs[2, :]); plotting.plot_stat_map(scan, display_mode="x", cut_coords=7, axes=ax,
+    ax.set_title("c   VBM scanner, deep/subcortical (axial montage)", loc="left", fontweight="bold", fontsize=8.0, color=C_SCAN, y=1.0)
+    ax = fig.add_subplot(gs[3, :]); plotting.plot_stat_map(scan, display_mode="x", cut_coords=7, axes=ax,
         colorbar=False, threshold=0.10, cmap="autumn_r", vmax=0.45, annotate=False, black_bg=False)
-    ax.set_title("d   VBM scanner (sagittal montage)", loc="left", fontweight="bold", fontsize=8.0, color=C_SCAN, y=1.0)
+    ax.set_title("d   VBM scanner, deep/subcortical (sagittal montage)", loc="left", fontweight="bold", fontsize=8.0, color=C_SCAN, y=1.0)
 
     coords = np.array([CENT[n] for n in CENT])
     sc_v = np.array([fsa[n][0] - 0.5 for n in CENT]); di_v = np.array([fsa[n][1] - 0.5 for n in CENT])
     vmx = float(max(sc_v.max(), di_v.max(), 0.05)) * 1.05
-    ax = fig.add_subplot(gs[3, 0]); plotting.plot_markers(sc_v, coords, node_cmap="autumn_r", node_vmin=0,
+    ax = fig.add_subplot(gs[4, 0]); plotting.plot_markers(sc_v, coords, node_cmap="autumn_r", node_vmin=0,
         node_vmax=vmx, display_mode="lzr", axes=ax, colorbar=True, node_size=40 + 420 * sc_v / vmx)
     ax.set_title("e   FreeSurfer subcortical scanner |AUC$-$0.5|", loc="left", fontweight="bold", fontsize=8.0, color=C_SCAN, y=0.97)
-    ax = fig.add_subplot(gs[3, 1]); plotting.plot_markers(di_v, coords, node_cmap="winter_r", node_vmin=0,
+    ax = fig.add_subplot(gs[4, 1]); plotting.plot_markers(di_v, coords, node_cmap="winter_r", node_vmin=0,
         node_vmax=vmx, display_mode="lzr", axes=ax, colorbar=True, node_size=40 + 420 * di_v / vmx)
     ax.set_title("f   FreeSurfer subcortical disease |AUC$-$0.5|", loc="left", fontweight="bold", fontsize=8.0, color=C_DIS, y=0.97)
 
-    ax = fig.add_subplot(gs[4, 0])
+    ax = fig.add_subplot(gs[5, 0])
     try:
         plotting.plot_prob_atlas(NMARK, display_mode="z", cut_coords=5, axes=ax, colorbar=False,
                                  view_type="filled_contours", linewidths=0.4)
@@ -110,7 +129,7 @@ def main():
         ax.text(0.5, 0.5, f"atlas render skipped", ha="center", fontsize=6); print("atlas:", e)
     ax.set_title("g   Neuromark 53-ICN atlas", loc="left", fontweight="bold", fontsize=8.0, y=1.0)
 
-    ax = fig.add_subplot(gs[4, 1])
+    ax = fig.add_subplot(gs[5, 1])
     mx = max(np.abs(a_s - 0.5).max(), np.abs(a_d - 0.5).max())
     ax.hist2d(np.abs(a_s - 0.5), np.abs(a_d - 0.5), bins=70, cmin=1, cmap="magma_r")
     ax.plot([0, mx], [0, mx], ls=":", lw=0.8, color="#777")

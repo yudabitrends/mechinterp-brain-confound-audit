@@ -7,3 +7,5 @@ matplotlib
 nibabel
 nilearn
 neuroCombat
+netplotbrain
+templateflow
