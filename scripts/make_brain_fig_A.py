@@ -220,11 +220,13 @@ def main():
     r_canon = gj["corr_canonical_vs_modelMeanDiff_disease"]
     dcoef = np.load(IMP / "disease_coef_abs.npy").astype(float)      # |L2 coef| classifier handle
 
-    fig = plt.figure(figsize=(183 * MM, 196 * MM))
-    gs = fig.add_gridspec(3, 6, height_ratios=[1.16, 0.84, 0.80],
-                          hspace=0.20, wspace=0.66, left=0.055, right=0.975,
-                          top=0.952, bottom=0.058)
-    fig.text(0.055, 0.975, "Functional connectome: the group-mean biology of disease and scanner",
+    # elsarticle[review] renders \includegraphics[width=\textwidth] at 345pt (~122mm); authoring at ~122mm
+    # makes the figure render 1:1 (true-size fonts, no 0.66x crush) and a ~186mm height fills the full page.
+    fig = plt.figure(figsize=(122 * MM, 186 * MM))
+    gs = fig.add_gridspec(3, 6, height_ratios=[1.04, 0.92, 0.88],
+                          hspace=0.165, wspace=0.58, left=0.045, right=0.988,
+                          top=0.952, bottom=0.052)
+    fig.text(0.045, 0.974, "Functional connectome: the group-mean biology of disease and scanner",
              fontsize=10.5, fontweight="bold")
 
     # a, b: chord connectograms of the SIGNED group-mean difference (hero) ------------------
@@ -239,9 +241,9 @@ def main():
 
     # c, d: signed hot-cold 53x53 matrices ------------------------------------------------
     matrix_signed(fig, fig.add_subplot(gs[1, 0:2]), dis, order, bnds,
-                  "Disease FNC difference (SZ−HC)", "c")
+                  "Disease (SZ−HC)", "c")
     matrix_signed(fig, fig.add_subplot(gs[1, 2:4]), scan, order, bnds,
-                  "Scanner FNC difference (China−US)", "d")
+                  "Scanner (China−US)", "d")
 
     # e: reconciliation -- the classifier handle is a different object from the biology -----
     ax = fig.add_subplot(gs[1, 4:6])
@@ -263,8 +265,7 @@ def main():
         ax.imshow(img); ax.axis("off")
     except Exception as e:
         ax.axis("off"); print(f"[atlas] embed failed: {repr(e)[:60]}")
-    ax.set_title("f   53-ICN NeuroMark atlas (your parcellation)", loc="left",
-                 fontweight="bold", fontsize=8.0, pad=2)
+    ax.set_title("f   NeuroMark atlas", loc="left", fontweight="bold", fontsize=8.0, pad=2)
 
     # g, h: signed 7x7 domain-block summaries ---------------------------------------------
     block_signed(fig, fig.add_subplot(gs[2, 2:4]), dis, c2d, "Disease blocks (SZ−HC)", "g")
