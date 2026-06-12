@@ -184,109 +184,114 @@ def block_signed(fig, ax, M, c2d, title, lab):
 
 
 def atlas_png():
-    """Render the 53-ICN NeuroMark probabilistic atlas to a temp PNG (filled contours, glass brain),
-    so we can imshow it into the gridspec without nilearn fighting the shared layout."""
-    from nilearn import plotting, image
+    """Render the 53-ICN NeuroMark probabilistic atlas to a temp PNG as a 2-row x 3-slice mosaic (filled
+    contours), so it is near-square and fills a full quadrant large and legible (Vince: panel f too small)."""
+    from nilearn import plotting
     fp = Path(tempfile.gettempdir()) / "_neuromark_atlas_fig4.png"
     try:
-        disp = plotting.plot_prob_atlas(_ATLAS, display_mode="z", cut_coords=[-12, 4, 18, 36],
-                                        view_type="filled_contours", threshold=0.5,
-                                        draw_cross=False, annotate=False, alpha=0.7)
-        disp.savefig(str(fp), dpi=300); disp.close()
+        mfig, maxes = plt.subplots(2, 1, figsize=(6.2, 4.2))
+        mfig.subplots_adjust(left=0.01, right=0.99, top=0.99, bottom=0.01, hspace=0.02)
+        for ax, cuts in zip(maxes, ([-16, -6, 6], [18, 32, 50])):
+            plotting.plot_prob_atlas(_ATLAS, display_mode="z", cut_coords=cuts,
+                                     view_type="filled_contours", threshold=0.5, axes=ax,
+                                     draw_cross=False, annotate=True, alpha=0.9, linewidths=0.7)
+        mfig.savefig(str(fp), dpi=420, bbox_inches="tight"); plt.close(mfig)
     except Exception as e:
         print(f"[atlas] prob_atlas failed ({repr(e)[:60]}); falling back to centroid markers")
         coords = np.load(IMP / "icn_mni_coords.npy"); c2d = domains()
         cols = [DOM_COL[c2d[i]] for i in range(N_ICN)]
-        disp = plotting.plot_markers(np.ones(N_ICN), coords, node_size=22, node_cmap=None,
-                                     display_mode="z", node_values=None) if False else None
-        fig, ax = plt.subplots(figsize=(4, 1.2))
-        plotting.plot_connectome(np.zeros((N_ICN, N_ICN)), coords, node_color=cols, node_size=14,
+        fig, ax = plt.subplots(figsize=(4, 2.4))
+        plotting.plot_connectome(np.zeros((N_ICN, N_ICN)), coords, node_color=cols, node_size=18,
                                  display_mode="z", axes=ax, annotate=False, colorbar=False)
-        fig.savefig(str(fp), dpi=300); plt.close(fig)
+        fig.savefig(str(fp), dpi=420); plt.close(fig)
     return fp
 
 
-def main():
-    c2d = domains()
-    order, bnds = order_and_bounds(c2d)
-    pos, ang, sectors = ring_positions(c2d)
+def _save(fig, stem):
+    for ext in ("pdf", "svg", "png"):
+        fig.savefig(OUT / f"{stem}.{ext}", dpi=380 if ext == "png" else None, bbox_inches="tight")
+    plt.close(fig)
 
-    dis = np.load(GD / "disease_meandiff.npy").astype(float)         # canonical SZ-HC (COBRE+FBIRN raw)
-    dis_model = np.load(GD / "disease_meandiff_model.npy").astype(float)
-    scan = np.load(GD / "scanner_meandiff_model.npy").astype(float)  # China-US (model 4-cohort)
-    gj = json.loads((GD / "group_diff.json").read_text())
-    r_dis = gj["corr_absMeanDiff_vs_absL2coef_disease"]
-    r_scan = gj["corr_absMeanDiff_vs_absL2coef_scanner"]
-    r_canon = gj["corr_canonical_vs_modelMeanDiff_disease"]
-    dcoef = np.load(IMP / "disease_coef_abs.npy").astype(float)      # |L2 coef| classifier handle
 
-    # elsarticle[review] renders \includegraphics[width=\textwidth] at 345pt (~122mm); authoring at ~122mm
-    # makes the figure render 1:1 (true-size fonts, no 0.66x crush) and a ~186mm height fills the full page.
-    fig = plt.figure(figsize=(122 * MM, 186 * MM))
-    gs = fig.add_gridspec(3, 6, height_ratios=[1.04, 0.92, 0.88],
-                          hspace=0.165, wspace=0.58, left=0.045, right=0.988,
-                          top=0.952, bottom=0.052)
-    fig.text(0.045, 0.974, "Functional connectome: the group-mean biology of disease and scanner",
-             fontsize=10.5, fontweight="bold")
-
-    # a, b: chord connectograms of the SIGNED group-mean difference (hero) ------------------
-    ax_a = fig.add_subplot(gs[0, 0:3])
-    vlim_d = chord_signed(ax_a, dis, c2d, pos, sectors, top=80,
-                          title="Disease   mean(SZ) − mean(HC)", letter="a",
-                          pos_lbl="red: SZ > HC (hyper)", neg_lbl="blue: SZ < HC (hypo)")
-    ax_b = fig.add_subplot(gs[0, 3:6])
-    chord_signed(ax_b, scan, c2d, pos, sectors, top=80,
+def page1(D):
+    """Figure 4 (page 1): the group-mean biology -- two large chord connectograms + two hot-cold matrices."""
+    c2d, order, bnds, pos, sectors = D["c2d"], D["order"], D["bnds"], D["pos"], D["sectors"]
+    fig = plt.figure(figsize=(122 * MM, 150 * MM))
+    gs = fig.add_gridspec(2, 2, height_ratios=[1.0, 1.0], hspace=0.10, wspace=0.24,
+                          left=0.065, right=0.97, top=0.928, bottom=0.05)
+    fig.text(0.05, 0.962, "Functional connectome: the group-mean biology of disease and scanner",
+             fontsize=10.0, fontweight="bold")
+    chord_signed(fig.add_subplot(gs[0, 0]), D["dis"], c2d, pos, sectors, top=80,
+                 title="Disease   mean(SZ) − mean(HC)", letter="a",
+                 pos_lbl="red: SZ > HC (hyper)", neg_lbl="blue: SZ < HC (hypo)")
+    chord_signed(fig.add_subplot(gs[0, 1]), D["scan"], c2d, pos, sectors, top=80,
                  title="Scanner   mean(China) − mean(US)", letter="b",
                  pos_lbl="red: China > US", neg_lbl="blue: China < US")
+    matrix_signed(fig, fig.add_subplot(gs[1, 0]), D["dis"], order, bnds, "Disease (SZ−HC)", "c")
+    matrix_signed(fig, fig.add_subplot(gs[1, 1]), D["scan"], order, bnds, "Scanner (China−US)", "d")
+    fig.text(0.05, 0.016,
+             "Nodes = 53 NeuroMark ICNs grouped by functional network (a,b); arcs and cells: red = positive, "
+             "blue = negative group-mean difference.  Disease is focal in cognitive-control and sensorimotor "
+             "connections; the scanner difference is pervasive and ~1.9× larger in magnitude.",
+             fontsize=5.4, color="#5A5E63")
+    _save(fig, "fig_brainA1")
 
-    # c, d: signed hot-cold 53x53 matrices ------------------------------------------------
-    matrix_signed(fig, fig.add_subplot(gs[1, 0:2]), dis, order, bnds,
-                  "Disease (SZ−HC)", "c")
-    matrix_signed(fig, fig.add_subplot(gs[1, 2:4]), scan, order, bnds,
-                  "Scanner (China−US)", "d")
 
-    # e: reconciliation -- the classifier handle is a different object from the biology -----
-    ax = fig.add_subplot(gs[1, 4:6])
-    x = dcoef; y = np.abs(dis_model[IU])
-    ax.scatter(x, y, s=3.2, c="#6B7077", alpha=0.45, linewidths=0)
-    ax.set_xlabel("classifier handle  |L2 coef|", fontsize=6.4)
-    ax.set_ylabel("group biology  |SZ−HC mean diff|", fontsize=6.4)
-    ax.set_title("e   Handle ≠ biology", loc="left", fontweight="bold", fontsize=8.2, pad=4)
-    ax.text(0.96, 0.94, f"$r$ = {r_dis:.2f}", transform=ax.transAxes, ha="right", va="top",
-            fontsize=7.5, fontweight="bold", color="#B64342")
-    ax.text(0.96, 0.80, f"scanner $r$ = {r_scan:.2f}", transform=ax.transAxes, ha="right", va="top",
-            fontsize=5.6, color="#6B7077")
-    ax.tick_params(labelsize=5.4)
-
-    # f: NeuroMark atlas provenance --------------------------------------------------------
-    ax = fig.add_subplot(gs[2, 0:2])
+def page2(D):
+    """Figure 4 (page 2, continued): why the classifier handle differs, the atlas, and the network blocks."""
+    c2d = D["c2d"]
+    fig = plt.figure(figsize=(122 * MM, 144 * MM))
+    gs = fig.add_gridspec(2, 2, height_ratios=[1.0, 0.84], hspace=0.18, wspace=0.30,
+                          left=0.095, right=0.95, top=0.928, bottom=0.055)
+    fig.text(0.05, 0.962, "Functional connectome (continued): classifier handle vs. biology, atlas, blocks",
+             fontsize=10.0, fontweight="bold")
+    ax = fig.add_subplot(gs[0, 0])
+    ax.scatter(D["dcoef"], np.abs(D["dis_model"][IU]), s=6, c="#6B7077", alpha=0.5, linewidths=0)
+    ax.set_xlabel("classifier handle  |L2 coef|", fontsize=7.2)
+    ax.set_ylabel("group biology  |SZ−HC mean diff|", fontsize=7.2)
+    ax.set_title("e   Handle ≠ biology", loc="left", fontweight="bold", fontsize=9.0, pad=4)
+    ax.text(0.96, 0.95, f"$r$ = {D['r_dis']:.2f}", transform=ax.transAxes, ha="right", va="top",
+            fontsize=10, fontweight="bold", color="#B64342")
+    ax.text(0.96, 0.82, f"scanner $r$ = {D['r_scan']:.2f}", transform=ax.transAxes, ha="right", va="top",
+            fontsize=7.0, color="#6B7077")
+    ax.tick_params(labelsize=6.4)
+    ax = fig.add_subplot(gs[0, 1])
     try:
-        img = plt.imread(str(atlas_png()))
-        ax.imshow(img); ax.axis("off")
+        ax.imshow(plt.imread(str(atlas_png()))); ax.axis("off")
     except Exception as e:
         ax.axis("off"); print(f"[atlas] embed failed: {repr(e)[:60]}")
-    ax.set_title("f   NeuroMark atlas", loc="left", fontweight="bold", fontsize=8.0, pad=2)
+    ax.set_title("f   NeuroMark 53-ICN atlas (your parcellation)", loc="left", fontweight="bold",
+                 fontsize=8.6, pad=3)
+    block_signed(fig, fig.add_subplot(gs[1, 0]), D["dis"], c2d, "Disease blocks (SZ−HC)", "g")
+    block_signed(fig, fig.add_subplot(gs[1, 1]), D["scan"], c2d, "Scanner blocks (China−US)", "h")
+    fig.text(0.05, 0.016,
+             f"The model's own training FNC reproduces the independent COBRE+FBIRN disease pattern at "
+             f"r = {D['r_canon']:.2f}, yet the |L2 classifier coefficient| is nearly orthogonal to the group "
+             f"biology (e, r = {D['r_dis']:.2f}): decodability ≠ the marginal effect.  (g,h) signed 7×7 "
+             "domain-block means.",
+             fontsize=5.4, color="#5A5E63")
+    _save(fig, "fig_brainA2")
 
-    # g, h: signed 7x7 domain-block summaries ---------------------------------------------
-    block_signed(fig, fig.add_subplot(gs[2, 2:4]), dis, c2d, "Disease blocks (SZ−HC)", "g")
-    block_signed(fig, fig.add_subplot(gs[2, 4:6]), scan, c2d, "Scanner blocks (China−US)", "h")
 
-    fig.text(0.055, 0.020,
-             "Nodes = 53 NeuroMark ICNs grouped by functional network (a,b); arcs/cells red = positive, "
-             "blue = negative group difference.  The model's own training FNC reproduces the independent "
-             f"COBRE+FBIRN disease pattern at r = {r_canon:.2f}, yet the |L2 classifier coefficient| is "
-             f"nearly orthogonal to it (e, r = {r_dis:.2f}): decodability ≠ the marginal biology.",
-             fontsize=5.2, color="#5A5E63")
-    for ext in ("pdf", "svg", "png"):
-        fig.savefig(OUT / f"fig_brainA.{ext}", dpi=380 if ext == "png" else None, bbox_inches="tight")
-    plt.close(fig)
+def main():
+    c2d = domains(); order, bnds = order_and_bounds(c2d); pos, ang, sectors = ring_positions(c2d)
+    gj = json.loads((GD / "group_diff.json").read_text())
+    D = dict(c2d=c2d, order=order, bnds=bnds, pos=pos, sectors=sectors,
+             dis=np.load(GD / "disease_meandiff.npy").astype(float),
+             dis_model=np.load(GD / "disease_meandiff_model.npy").astype(float),
+             scan=np.load(GD / "scanner_meandiff_model.npy").astype(float),
+             dcoef=np.load(IMP / "disease_coef_abs.npy").astype(float),
+             r_dis=gj["corr_absMeanDiff_vs_absL2coef_disease"],
+             r_scan=gj["corr_absMeanDiff_vs_absL2coef_scanner"],
+             r_canon=gj["corr_canonical_vs_modelMeanDiff_disease"])
+    page1(D); page2(D)
     import pandas as pd
-    pd.DataFrame({"r_absMeanDiff_vs_L2coef_disease": [r_dis],
-                  "r_absMeanDiff_vs_L2coef_scanner": [r_scan],
-                  "r_canonical_vs_model_disease": [r_canon]}).to_csv(
+    pd.DataFrame({"r_absMeanDiff_vs_L2coef_disease": [D["r_dis"]],
+                  "r_absMeanDiff_vs_L2coef_scanner": [D["r_scan"]],
+                  "r_canonical_vs_model_disease": [D["r_canon"]]}).to_csv(
         SRC / "fig4_reconciliation.csv", index=False)
-    print(f"[fig4] saved fig_brainA  disease-handle r={r_dis:.3f}  scanner-handle r={r_scan:.3f}  "
-          f"canon-model r={r_canon:.3f}  vlim_d={vlim_d:.3f}")
+    print(f"[fig4] saved fig_brainA1 + fig_brainA2  disease-handle r={D['r_dis']:.3f}  "
+          f"scanner-handle r={D['r_scan']:.3f}  canon-model r={D['r_canon']:.3f}")
 
 
 if __name__ == "__main__":
