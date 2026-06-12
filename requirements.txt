@@ -9,3 +9,4 @@ nilearn
 neuroCombat
 netplotbrain
 templateflow
+neuroHarmonize

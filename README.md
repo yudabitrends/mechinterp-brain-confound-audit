@@ -35,7 +35,10 @@ scripts/                 pipeline, controls, experiments, and figures (~65 scrip
     ctrl_entangled_full.py        passenger-vs-shortcut (entangled regime)
     ctrl_spd_intervention.py      connectome-native SPD (log-Euclidean) intervention operator
     ctrl_offsite_closedloop.py    unseen-site deployment gate (decodability vs causal-exposure;
-                                  matched-control false-positive-rate gap + bootstrap CIs)
+                                  matched-control false-positive-rate gap + bootstrap CIs); also
+                                  the in-distribution reconciliation and model-selection loops
+    ctrl_highsignal_compression.py  k=1 DAS interchange on a high-signal attribute (sex) control
+    ctrl_modern_harmonize.py      covariate-preserving ComBat (neuroHarmonize) unseen-site test
     ctrl_decode_vs_causal.py      decodable-but-noncausal direction families
     ctrl_natural_abide.py         ABIDE under-alarm direction
     ctrl_fd_residualize.py        head-motion (framewise-displacement) control
