@@ -1,28 +1,31 @@
-"""Standalone brain/FNC atlas figure (8 panels) — concentrates every brain-space
-view of the scanner-vs-disease confound geometry into one display.
+"""Figure 4 — Functional connectome: the GROUP-MEAN biology of disease and scanner, and why the
+classifier handle is a different object (Vince viz round).
 
-  a  disease-predictive connectome (glass brain, 4 views)
-  b  scanner-predictive connectome (glass brain, 4 views)
-  c  disease-predictive FNC importance matrix (53x53, 7 domains)
-  d  scanner-predictive FNC importance matrix (53x53)
-  e  top-100 edge overlay (disease / scanner / shared)
-  f  disease hub regions (glass-brain markers, sized by incident importance)
-  g  scanner hub regions (glass-brain markers)
-  h  network-domain incidence of each signal's top-100 edges
+Redesigned per reviewer request to lead with the interpretable biology:
+  a  disease chord connectogram      signed mean(SZ)-mean(HC) edges (red hyper / blue hypo), domain-grouped
+  b  scanner chord connectogram      signed mean(China)-mean(US) edges
+  c  disease 53x53 hot-cold matrix   canonical mean(SZ)-mean(HC) (COBRE+FBIRN raw NeuroMark sFNC)
+  d  scanner 53x53 hot-cold matrix   mean(China)-mean(US) on the model's own 4-cohort FNC
+  e  reconciliation scatter          |L2 classifier coef| vs |group mean diff|: the handle != the biology (r~0.06)
+  f  NeuroMark 53-ICN atlas          the parcellation that every edge comes from (data provenance)
+  g  disease 7x7 domain blocks       signed mean(SZ)-mean(HC) network-block means
+  h  scanner 7x7 domain blocks       signed mean(China)-mean(US) network-block means
 
-Data: outputs/p_fnc_edge_importance/ (+ NeuroMark1 domain template). 53-ICN atlas,
-N=1,246 SZ subjects / 16 sites / 1,378 FNC edges. Run: python scripts/make_fig_brain_atlas.py
+Data: outputs/fnc_groupdiff/ (signed group-mean diffs, from scripts/fnc_group_diff.py) and
+outputs/fnc_importance/ (|L2 coef| classifier maps, for the reconciliation). 53-ICN NeuroMark atlas.
+Run: python scripts/make_brain_fig_A.py
 """
 from __future__ import annotations
-import os
-import json
+import os, json, tempfile
 from pathlib import Path
 import numpy as np
 import matplotlib as mpl
 mpl.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib import font_manager as fm
-from matplotlib.colors import ListedColormap, BoundaryNorm, LinearSegmentedColormap
+from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm, ListedColormap
+from matplotlib.path import Path as MPath
+import matplotlib.patches as mpatches
 from matplotlib.patches import Rectangle
 
 _HEROS = Path("/home/users/ybi3/texlive/2026/texmf-dist/fonts/opentype/public/tex-gyre")
@@ -42,11 +45,13 @@ mpl.rcParams.update({
 })
 MM = 1 / 25.4
 REPO = Path(__file__).resolve().parent.parent
-DAT = REPO / "outputs" / "fnc_importance"
+GD = REPO / "outputs" / "fnc_groupdiff"
+IMP = REPO / "outputs" / "fnc_importance"
 OUT = REPO / "manuscript" / "figures"; OUT.mkdir(parents=True, exist_ok=True)
 SRC = REPO / "manuscript" / "source_data"; SRC.mkdir(parents=True, exist_ok=True)
 
-C_DIS, C_SCAN, C_BOTH, C_INK = "#1F5FA6", "#B64342", "#7B4EA3", "#222428"
+C_INK = "#222428"
+C_DIS, C_SCAN, C_BOTH = "#1F5FA6", "#B64342", "#7B4EA3"
 N_ICN = 53
 DOM_ORDER = ["SC", "AU", "SM", "VI", "CC", "DM", "CB"]
 DOM_NAME = {"SC": "Subcortical", "AU": "Auditory", "SM": "Sensorimotor", "VI": "Visual",
@@ -54,6 +59,8 @@ DOM_NAME = {"SC": "Subcortical", "AU": "Auditory", "SM": "Sensorimotor", "VI": "
 DOM_COL = {"SC": "#7E4FA0", "AU": "#E0A526", "SM": "#3FA0C4", "VI": "#4DAF63",
            "CC": "#D8612C", "DM": "#C0476B", "CB": "#7A7D82"}
 _DFILE = Path("/data/qneuromark/Network_templates/NeuroMark1/Neuromark_fMRI_1.0.txt")
+_ATLAS = "/data/qneuromark/Network_templates/NeuroMark1/Neuromark_fMRI_1.0.nii"
+IU = np.triu_indices(N_ICN, 1)
 
 
 def domains():
@@ -74,54 +81,6 @@ def domains():
     return c2d
 
 
-def trunc(base, lo=0.32, hi=1.0):
-    c = plt.get_cmap(base)
-    return LinearSegmentedColormap.from_list(f"{base}_t", c(np.linspace(lo, hi, 256)))
-
-
-def vec_to_mat(vec):
-    M = np.zeros((N_ICN, N_ICN)); iu = np.triu_indices(N_ICN, k=1)
-    M[iu] = vec; M[(iu[1], iu[0])] = vec
-    return M
-
-
-def rankn(v):
-    return np.argsort(np.argsort(v)) / (len(v) - 1)
-
-
-def block_matrix(vec, c2d):
-    """7x7 network-block mean importance (the level at which structure is real;
-    edge-level 53x53 is too sparse/diffuse to read)."""
-    M = vec_to_mat(vec)
-    idx = {d: [k for k in range(N_ICN) if c2d[k] == d] for d in DOM_ORDER}
-    B = np.zeros((7, 7))
-    for i, di in enumerate(DOM_ORDER):
-        for j, dj in enumerate(DOM_ORDER):
-            B[i, j] = M[np.ix_(idx[di], idx[dj])].mean()
-    return B
-
-
-def block_panel(ax, B, cmap, title, lab):
-    Bn = (B - B.min()) / (np.ptp(B) + 1e-9)
-    ax.imshow(Bn, cmap=cmap, vmin=0, vmax=1, origin="upper", interpolation="nearest")
-    ax.set_xticks(range(7)); ax.set_yticks(range(7))
-    ax.set_xticklabels(DOM_ORDER, fontsize=5.8); ax.set_yticklabels(DOM_ORDER, fontsize=5.8)
-    ax.tick_params(length=0)
-    for i in range(7):
-        for j in range(7):
-            if Bn[i, j] >= 0.72:
-                ax.text(j, i, f"{B[i, j]:.2f}", ha="center", va="center",
-                        fontsize=4.6, color="white", fontweight="bold")
-    ax.set_title(f"{lab}   {title}", loc="left", fontweight="bold", fontsize=8.0, pad=4)
-
-
-def adjacency(coef, top, n):
-    iu = np.triu_indices(N_ICN, k=1); sel = top[:n]; cs = coef[sel]
-    w = np.zeros(len(coef)); w[sel] = 0.45 + 0.55 * (cs - cs.min()) / (np.ptp(cs) + 1e-9)
-    A = np.zeros((N_ICN, N_ICN)); A[iu] = w; A[(iu[1], iu[0])] = w
-    return A
-
-
 def order_and_bounds(c2d):
     order = []
     for dom in DOM_ORDER:
@@ -132,151 +91,201 @@ def order_and_bounds(c2d):
     return np.array(order), bnds
 
 
-def matrix_panel(ax, M, order, bnds, cmap, title, lab):
+def ring_positions(c2d, gap=0.06):
+    order = [i for d in DOM_ORDER for i in range(N_ICN) if c2d[i] == d]
+    span = (2 * np.pi - gap * len(DOM_ORDER))
+    ang = np.zeros(N_ICN); sectors = {}; a = np.pi / 2
+    for d in DOM_ORDER:
+        idx = [i for i in order if c2d[i] == d]; a0 = a
+        for i in idx:
+            ang[i] = a - (span / N_ICN) / 2; a -= span / N_ICN
+        sectors[d] = (a0, a); a -= gap
+    return np.c_[np.cos(ang), np.sin(ang)], ang, sectors
+
+
+# ---- signed diverging colormap (hot = positive/hyper, cold = negative/hypo) ----
+HOTCOLD = "RdBu_r"
+
+
+def chord_signed(ax, M, c2d, pos, sectors, top=80, title="", letter="", vlim=None, pos_lbl="", neg_lbl=""):
+    """Chord connectogram of a SIGNED 53x53 matrix: top-|edge| arcs coloured red (positive) / blue
+    (negative) by a diverging map; node dots coloured by domain, sized by incident |value|."""
+    vals = M[IU]
+    vlim = vlim or float(np.percentile(np.abs(vals), 99.5))
+    norm = TwoSlopeNorm(vmin=-vlim, vcenter=0.0, vmax=vlim)
+    cmap = plt.get_cmap(HOTCOLD)
+    order = np.argsort(np.abs(vals))[::-1][:top]
+    inc = np.zeros(N_ICN)
+    for e in range(len(vals)):
+        inc[IU[0][e]] += abs(vals[e]); inc[IU[1][e]] += abs(vals[e])
+    inc /= inc.max() + 1e-12
+    R = 1.13
+    for d, (a0, a1) in sectors.items():
+        th = np.linspace(a0, a1, 40)
+        ax.plot(R * np.cos(th), R * np.sin(th), color=DOM_COL[d], lw=3.2, solid_capstyle="butt")
+        am = (a0 + a1) / 2
+        ax.text(1.32 * np.cos(am), 1.32 * np.sin(am), DOM_NAME[d].replace(" ", "\n"),
+                ha="center", va="center", fontsize=4.9, color=DOM_COL[d], fontweight="bold")
+    for e in order:
+        i, j = IU[0][e], IU[1][e]; v = vals[e]; w = abs(v) / vlim
+        p0, p1 = pos[i], pos[j]; ctrl = (p0 + p1) / 2 * (0.18 + 0.32 * (1 - min(w, 1)))
+        path = MPath([tuple(p0), tuple(ctrl), tuple(p1)], [MPath.MOVETO, MPath.CURVE3, MPath.CURVE3])
+        ax.add_patch(mpatches.PathPatch(path, fc="none", ec=cmap(norm(v)),
+                                        lw=0.4 + 1.9 * min(w, 1), alpha=0.45 + 0.5 * min(w, 1),
+                                        capstyle="round"))
+    for i in range(N_ICN):
+        ax.scatter(*pos[i], s=6 + 90 * inc[i] ** 1.4, c=DOM_COL[c2d[i]],
+                   edgecolors="white", linewidths=0.3, zorder=5)
+    ax.set_xlim(-1.42, 1.42); ax.set_ylim(-1.46, 1.42); ax.set_aspect("equal"); ax.axis("off")
+    if title:
+        ax.set_title(title, fontsize=8.2, fontweight="bold", pad=1)
+    if letter:
+        ax.text(-1.40, 1.40, letter, fontsize=11, fontweight="bold", va="top")
+    if pos_lbl:
+        ax.text(1.40, -1.30, pos_lbl, fontsize=5.2, color="#B2182B", ha="right", fontweight="bold")
+        ax.text(1.40, -1.44, neg_lbl, fontsize=5.2, color="#2166AC", ha="right", fontweight="bold")
+    return vlim
+
+
+def matrix_signed(fig, ax, M, order, bnds, title, lab, vlim=None, unit=r"$\Delta$ r"):
     Mo = M[np.ix_(order, order)]
-    ax.imshow(Mo, cmap=cmap, vmin=0.5, vmax=1.0, origin="upper", interpolation="nearest")
+    vlim = vlim or float(np.percentile(np.abs(M[IU]), 99))
+    im = ax.imshow(Mo, cmap=HOTCOLD, vmin=-vlim, vmax=vlim, origin="upper", interpolation="nearest")
     for (s, e, dom) in bnds:
-        ax.add_patch(Rectangle((s - .5, s - .5), e - s, e - s, fill=False, ec=C_INK, lw=0.6))
-        ax.text(-1.4, (s + e) / 2 - .5, dom, ha="right", va="center", fontsize=5.0)
+        ax.add_patch(Rectangle((s - .5, s - .5), e - s, e - s, fill=False, ec=C_INK, lw=0.55))
+        ax.text(-1.6, (s + e) / 2 - .5, dom, ha="right", va="center", fontsize=5.0, color=DOM_COL[dom])
     ax.set_xticks([]); ax.set_yticks([]); ax.set_xlim(-6, N_ICN - 0.5)
-    ax.set_title(f"{lab}   {title}", loc="left", fontweight="bold", fontsize=8.5, pad=4)
+    ax.set_title(f"{lab}   {title}", loc="left", fontweight="bold", fontsize=8.2, pad=4)
+    cb = fig.colorbar(im, ax=ax, fraction=0.045, pad=0.02)
+    cb.ax.tick_params(labelsize=5.0, length=2); cb.set_label(unit, fontsize=5.6)
+    cb.outline.set_linewidth(0.4)
+    return vlim
 
 
-def netplot_connectome(fig, spec, coef, top, coords, c2d, edge_color, n_top=70, views=("L", "S", "R")):
-    """Embed a modern 3D node-edge connectome (netplotbrain, matplotlib Axes3D -> headless-safe, no VTK) into the
-    gridspec region `spec`, split into len(views) sub-axes on a translucent MNI template. Nodes are coloured by
-    functional domain and sized by incident importance. We neutralise netplotbrain's internal fig.tight_layout()
-    so it cannot disturb the surrounding multi-panel gridspec."""
-    os.environ.setdefault("TEMPLATEFLOW_HOME", "/data/users1/ybi/mechinterp_brain/templateflow")
-    import netplotbrain, pandas as pd
-    A = adjacency(coef, top, n_top)
-    nodes = pd.DataFrame({"x": coords[:, 0], "y": coords[:, 1], "z": coords[:, 2]})
-    ncol = [DOM_COL[c2d[i]] for i in range(N_ICN)]
-    nsz = 5 + 16 * (A.sum(0) / (A.sum(0).max() + 1e-9))
-    sub = spec.subgridspec(1, len(views), wspace=0.0)
-    axes = []
-    _tl = fig.tight_layout; fig.tight_layout = lambda *a, **k: None     # guard the shared gridspec
+def block_signed(fig, ax, M, c2d, title, lab):
+    idx = {d: [k for k in range(N_ICN) if c2d[k] == d] for d in DOM_ORDER}
+    B = np.zeros((7, 7))
+    for i, di in enumerate(DOM_ORDER):
+        for j, dj in enumerate(DOM_ORDER):
+            B[i, j] = M[np.ix_(idx[di], idx[dj])].mean()
+    vlim = float(np.abs(B).max()) + 1e-9
+    im = ax.imshow(B, cmap=HOTCOLD, vmin=-vlim, vmax=vlim, origin="upper", interpolation="nearest")
+    ax.set_xticks(range(7)); ax.set_yticks(range(7))
+    ax.set_xticklabels(DOM_ORDER, fontsize=5.6); ax.set_yticklabels(DOM_ORDER, fontsize=5.6)
+    ax.tick_params(length=0)
+    for i in range(7):
+        for j in range(7):
+            if abs(B[i, j]) >= 0.55 * vlim:
+                ax.text(j, i, f"{B[i, j]:+.02f}", ha="center", va="center", fontsize=4.4,
+                        color="white" if abs(B[i, j]) > 0.72 * vlim else C_INK, fontweight="bold")
+    ax.set_title(f"{lab}   {title}", loc="left", fontweight="bold", fontsize=8.0, pad=4)
+    cb = fig.colorbar(im, ax=ax, fraction=0.045, pad=0.02)
+    cb.ax.tick_params(labelsize=4.6, length=2); cb.outline.set_linewidth(0.4)
+
+
+def atlas_png():
+    """Render the 53-ICN NeuroMark probabilistic atlas to a temp PNG (filled contours, glass brain),
+    so we can imshow it into the gridspec without nilearn fighting the shared layout."""
+    from nilearn import plotting, image
+    fp = Path(tempfile.gettempdir()) / "_neuromark_atlas_fig4.png"
     try:
-        for k, v in enumerate(views):                                  # one netplotbrain call per view/axes
-            ax = fig.add_subplot(sub[0, k], projection="3d")
-            netplotbrain.plot(nodes=nodes, edges=A, fig=fig, ax=ax, view=v,
-                              template="MNI152NLin2009cAsym", templatestyle="glass",
-                              template_glass_maxalpha=0.03, template_glass_pointsize=1.6,  # visible brain shell
-                              node_color=ncol, node_size=nsz, node_alpha=1.0,
-                              edge_color=edge_color, edge_alpha=0.55, edge_widthscale=0.55,
-                              arrowaxis=None, subtitles=None, title=None)
-            axes.append(ax)
-    finally:
-        fig.tight_layout = _tl
-    return axes
+        disp = plotting.plot_prob_atlas(_ATLAS, display_mode="z", cut_coords=[-12, 4, 18, 36],
+                                        view_type="filled_contours", threshold=0.5,
+                                        draw_cross=False, annotate=False, alpha=0.7)
+        disp.savefig(str(fp), dpi=300); disp.close()
+    except Exception as e:
+        print(f"[atlas] prob_atlas failed ({repr(e)[:60]}); falling back to centroid markers")
+        coords = np.load(IMP / "icn_mni_coords.npy"); c2d = domains()
+        cols = [DOM_COL[c2d[i]] for i in range(N_ICN)]
+        disp = plotting.plot_markers(np.ones(N_ICN), coords, node_size=22, node_cmap=None,
+                                     display_mode="z", node_values=None) if False else None
+        fig, ax = plt.subplots(figsize=(4, 1.2))
+        plotting.plot_connectome(np.zeros((N_ICN, N_ICN)), coords, node_color=cols, node_size=14,
+                                 display_mode="z", axes=ax, annotate=False, colorbar=False)
+        fig.savefig(str(fp), dpi=300); plt.close(fig)
+    return fp
 
 
 def main():
-    from nilearn import plotting
-
-    scanner = np.load(DAT / "scanner_coef_abs.npy").astype(float)
-    disease = np.load(DAT / "disease_coef_abs.npy").astype(float)
-    s_top = np.load(DAT / "scanner_top100.npy"); d_top = np.load(DAT / "disease_top100.npy")
-    coords = np.load(DAT / "icn_mni_coords.npy")
-    meta = json.loads((DAT / "meta.json").read_text()); jac = meta["jaccard_top100_l2"]
-    c2d = domains(); node_colors = [DOM_COL[c2d[i]] for i in range(N_ICN)]
+    c2d = domains()
     order, bnds = order_and_bounds(c2d)
+    pos, ang, sectors = ring_positions(c2d)
 
-    fig = plt.figure(figsize=(183 * MM, 212 * MM))
-    # The full-width connectome rows (0,1) are width-limited, so their generous height held whitespace; trim
-    # total height to ease the page-fit of this dense plate without shrinking any brain render.
-    gs = fig.add_gridspec(4, 6, height_ratios=[1.05, 1.05, 0.92, 0.92],
-                          hspace=0.40, wspace=0.62, left=0.045, right=0.985,
-                          top=0.955, bottom=0.045)
-    fig.text(0.045, 0.975, "Functional connectome: where the scanner confound and disease live",
+    dis = np.load(GD / "disease_meandiff.npy").astype(float)         # canonical SZ-HC (COBRE+FBIRN raw)
+    dis_model = np.load(GD / "disease_meandiff_model.npy").astype(float)
+    scan = np.load(GD / "scanner_meandiff_model.npy").astype(float)  # China-US (model 4-cohort)
+    gj = json.loads((GD / "group_diff.json").read_text())
+    r_dis = gj["corr_absMeanDiff_vs_absL2coef_disease"]
+    r_scan = gj["corr_absMeanDiff_vs_absL2coef_scanner"]
+    r_canon = gj["corr_canonical_vs_modelMeanDiff_disease"]
+    dcoef = np.load(IMP / "disease_coef_abs.npy").astype(float)      # |L2 coef| classifier handle
+
+    fig = plt.figure(figsize=(183 * MM, 196 * MM))
+    gs = fig.add_gridspec(3, 6, height_ratios=[1.16, 0.84, 0.80],
+                          hspace=0.20, wspace=0.66, left=0.055, right=0.975,
+                          top=0.952, bottom=0.058)
+    fig.text(0.055, 0.975, "Functional connectome: the group-mean biology of disease and scanner",
              fontsize=10.5, fontweight="bold")
 
-    # a, b: modern 3D node-edge connectomes on a translucent MNI template (netplotbrain) -------------------
-    for row, (coef, top, col, lab, name) in enumerate([
-            (disease, d_top, C_DIS, "a", "Disease-predictive connectome"),
-            (scanner, s_top, C_SCAN, "b", "Scanner-predictive connectome")]):
-        netplot_connectome(fig, gs[row, :], coef, top, coords, c2d, edge_color=col)
-        pos = gs[row, :].get_position(fig)
-        fig.text(pos.x0 + 0.004, pos.y1 - 0.004, f"{lab}   {name}", fontsize=9.5, fontweight="bold",
-                 color=col, ha="left", va="top")
+    # a, b: chord connectograms of the SIGNED group-mean difference (hero) ------------------
+    ax_a = fig.add_subplot(gs[0, 0:3])
+    vlim_d = chord_signed(ax_a, dis, c2d, pos, sectors, top=80,
+                          title="Disease   mean(SZ) − mean(HC)", letter="a",
+                          pos_lbl="red: SZ > HC (hyper)", neg_lbl="blue: SZ < HC (hypo)")
+    ax_b = fig.add_subplot(gs[0, 3:6])
+    chord_signed(ax_b, scan, c2d, pos, sectors, top=80,
+                 title="Scanner   mean(China) − mean(US)", letter="b",
+                 pos_lbl="red: China > US", neg_lbl="blue: China < US")
 
-    # c, d: network-block importance matrices (7x7; the level where structure
-    #       is interpretable — edge-level 53x53 is too diffuse to read) -------
-    block_panel(fig.add_subplot(gs[2, 0:2]), block_matrix(disease, c2d),
-                "Blues", "Disease network-block importance", "c")
-    block_panel(fig.add_subplot(gs[2, 2:4]), block_matrix(scanner, c2d),
-                "Reds", "Scanner network-block importance", "d")
+    # c, d: signed hot-cold 53x53 matrices ------------------------------------------------
+    matrix_signed(fig, fig.add_subplot(gs[1, 0:2]), dis, order, bnds,
+                  "Disease FNC difference (SZ−HC)", "c")
+    matrix_signed(fig, fig.add_subplot(gs[1, 2:4]), scan, order, bnds,
+                  "Scanner FNC difference (China−US)", "d")
 
-    # e: top-100 overlay matrix -------------------------------------------
-    ax = fig.add_subplot(gs[2, 4:6])
-    iu = np.triu_indices(N_ICN, k=1)
-    cat = np.zeros(len(scanner), dtype=int); cat[d_top] = 1; cat[s_top] += 2
-    Mc = np.zeros((N_ICN, N_ICN), int); Mc[iu] = cat; Mc[(iu[1], iu[0])] = cat
-    Mc = Mc[np.ix_(order, order)]
-    cmap = ListedColormap(["#F2F3F5", C_DIS, C_SCAN, C_BOTH])
-    ax.imshow(Mc, cmap=cmap, norm=BoundaryNorm([-.5, .5, 1.5, 2.5, 3.5], 4),
-              origin="upper", interpolation="nearest")
-    for (s, e, dom) in bnds:
-        ax.add_patch(Rectangle((s - .5, s - .5), e - s, e - s, fill=False, ec=C_INK, lw=0.6))
-    ax.set_xticks([]); ax.set_yticks([])
-    n_both = int((cat == 3).sum())
-    ax.set_title(f"e   Top-100 overlap ({n_both} shared)", loc="left", fontweight="bold",
-                 fontsize=8.5, pad=4)
-    from matplotlib.patches import Patch
-    ax.legend(handles=[Patch(fc=C_DIS, label="disease"), Patch(fc=C_SCAN, label="scanner"),
-                       Patch(fc=C_BOTH, label="both")], loc="upper center",
-              bbox_to_anchor=(0.5, -0.02), ncol=3, fontsize=5.6, handlelength=1.0,
-              columnspacing=0.8)
+    # e: reconciliation -- the classifier handle is a different object from the biology -----
+    ax = fig.add_subplot(gs[1, 4:6])
+    x = dcoef; y = np.abs(dis_model[IU])
+    ax.scatter(x, y, s=3.2, c="#6B7077", alpha=0.45, linewidths=0)
+    ax.set_xlabel("classifier handle  |L2 coef|", fontsize=6.4)
+    ax.set_ylabel("group biology  |SZ−HC mean diff|", fontsize=6.4)
+    ax.set_title("e   Handle ≠ biology", loc="left", fontweight="bold", fontsize=8.2, pad=4)
+    ax.text(0.96, 0.94, f"$r$ = {r_dis:.2f}", transform=ax.transAxes, ha="right", va="top",
+            fontsize=7.5, fontweight="bold", color="#B64342")
+    ax.text(0.96, 0.80, f"scanner $r$ = {r_scan:.2f}", transform=ax.transAxes, ha="right", va="top",
+            fontsize=5.6, color="#6B7077")
+    ax.tick_params(labelsize=5.4)
 
-    # f, g: top hub regions as labelled ranked bars (readable: which ICN/network
-    #       is a hub, vs unlabelled glass-brain markers) -----------------------
-    def hub_strength(coef, top):
-        A = adjacency(coef, top, 100); return A.sum(0)
-    for col_i, (coef, top, color, lab, name) in enumerate([
-            (disease, d_top, C_DIS, "f", "Disease hub regions"),
-            (scanner, s_top, C_SCAN, "g", "Scanner hub regions")]):
-        ax = fig.add_subplot(gs[3, col_i * 2:col_i * 2 + 2])
-        hs = hub_strength(coef, top)
-        tk = np.argsort(hs)[::-1][:8][::-1]            # top-8, ascending for barh
-        yy = np.arange(len(tk))
-        ax.barh(yy, hs[tk], color=color, height=0.72, edgecolor="white", linewidth=0.4)
-        ax.set_yticks(yy)
-        ax.set_yticklabels([f"ICN{k+1} · {DOM_NAME[c2d[k]]}" for k in tk], fontsize=5.0)
-        ax.tick_params(axis="y", length=0)
-        ax.set_xlabel("hub strength (incident importance)", fontsize=6.0)
-        ax.set_xlim(0, hs.max() * 1.02)
-        ax.set_title(f"{lab}   {name}", loc="left", fontweight="bold", fontsize=8.5,
-                     color=color, pad=4)
+    # f: NeuroMark atlas provenance --------------------------------------------------------
+    ax = fig.add_subplot(gs[2, 0:2])
+    try:
+        img = plt.imread(str(atlas_png()))
+        ax.imshow(img); ax.axis("off")
+    except Exception as e:
+        ax.axis("off"); print(f"[atlas] embed failed: {repr(e)[:60]}")
+    ax.set_title("f   53-ICN NeuroMark atlas (your parcellation)", loc="left",
+                 fontweight="bold", fontsize=8.0, pad=2)
 
-    # h: network-domain incidence -----------------------------------------
-    ax = fig.add_subplot(gs[3, 4:6])
-    ei, ej = iu
+    # g, h: signed 7x7 domain-block summaries ---------------------------------------------
+    block_signed(fig, fig.add_subplot(gs[2, 2:4]), dis, c2d, "Disease blocks (SZ−HC)", "g")
+    block_signed(fig, fig.add_subplot(gs[2, 4:6]), scan, c2d, "Scanner blocks (China−US)", "h")
 
-    def inc(top):
-        c = {d: 0 for d in DOM_ORDER}
-        for e in top:
-            c[c2d[ei[e]]] += 1; c[c2d[ej[e]]] += 1
-        return np.array([c[d] for d in DOM_ORDER])
-    dc_d, dc_s = inc(d_top), inc(s_top)
-    yy = np.arange(len(DOM_ORDER)); h = 0.4
-    ax.barh(yy + h / 2, dc_d, height=h, color=C_DIS, label="disease")
-    ax.barh(yy - h / 2, dc_s, height=h, color=C_SCAN, label="scanner")
-    ax.set_yticks(yy); ax.set_yticklabels([DOM_NAME[d] for d in DOM_ORDER], fontsize=6.0)
-    ax.invert_yaxis(); ax.set_xlabel("top-100 edge endpoints", fontsize=6.5)
-    ax.legend(loc="lower right", fontsize=6.0, handlelength=1.0)
-    ax.set_title("h   Networks recruited", loc="left", fontweight="bold", fontsize=8.5, pad=4)
-
-    # shared domain colour key (bottom strip)
-    fig.text(0.045, 0.018, "Nodes coloured by functional network:  " +
-             "   ".join(DOM_NAME[d] for d in DOM_ORDER), fontsize=5.6, color="#5A5E63")
+    fig.text(0.055, 0.020,
+             "Nodes = 53 NeuroMark ICNs grouped by functional network (a,b); arcs/cells red = positive, "
+             "blue = negative group difference.  The model's own training FNC reproduces the independent "
+             f"COBRE+FBIRN disease pattern at r = {r_canon:.2f}, yet the |L2 classifier coefficient| is "
+             f"nearly orthogonal to it (e, r = {r_dis:.2f}): decodability ≠ the marginal biology.",
+             fontsize=5.2, color="#5A5E63")
     for ext in ("pdf", "svg", "png"):
-        fig.savefig(OUT / f"fig_brainA.{ext}", dpi=380 if ext == "png" else None,
-                    bbox_inches="tight")
+        fig.savefig(OUT / f"fig_brainA.{ext}", dpi=380 if ext == "png" else None, bbox_inches="tight")
     plt.close(fig)
     import pandas as pd
-    pd.DataFrame({"domain": DOM_ORDER, "disease_incidence": dc_d,
-                  "scanner_incidence": dc_s}).to_csv(SRC / "fig_brain_atlas_incidence.csv", index=False)
-    print(f"[brain-atlas] saved fig_brainA  jaccard={jac:.3f} both={n_both}")
+    pd.DataFrame({"r_absMeanDiff_vs_L2coef_disease": [r_dis],
+                  "r_absMeanDiff_vs_L2coef_scanner": [r_scan],
+                  "r_canonical_vs_model_disease": [r_canon]}).to_csv(
+        SRC / "fig4_reconciliation.csv", index=False)
+    print(f"[fig4] saved fig_brainA  disease-handle r={r_dis:.3f}  scanner-handle r={r_scan:.3f}  "
+          f"canon-model r={r_canon:.3f}  vlim_d={vlim_d:.3f}")
 
 
 if __name__ == "__main__":
